@@ -69,7 +69,23 @@ Sensor Message State        | Enum of u8   | 1             | None
 E2E-Counter                 | u8           | 0 or 1        | N/A
 E2E-CRC                     | u16          | 0 or 2        | N/A
 
-See the spec for values of fields _Therapy Control State_, _Operational State_, _Flags_.
+See the spec for values of field _Therapy Control State_.
+
+The following values are defined for the _Operational State_ field:
+
+Value | Name         | Description
+------|--------------|-------------
+ 0x0F | Undetermined |
+ 0x33 | Off          |
+ 0x3C | Standby      |
+ 0x55 | Preparing    | reservoir/set change in progress (rewind)
+ 0x5A | Priming      | reservoir/set change in progress (priming)
+ 0x66 | Waiting      | reservoir/set change in progress
+ 0x96 | Ready        | normal delivery
+
+Observed live on a 780G: _Operational State_ reads `Ready` during normal delivery and moves through `Preparing → Priming → Waiting` during a reservoir/set change, while _Therapy Control State_ stays `Stop`. So _Operational State_ is what distinguishes a reservoir change from a plain user suspend — _Therapy Control State_ is `Stop` for both.
+
+Bit 0 of the _Flags_ field is _Reservoir Attached_. It is already set during the priming phase of a reservoir change, so it is not a reliable "reservoir out" signal; use _Operational State_ for that. The other _Flags_ bits are not characterised.
 
 Bits in the _Sensor Connectivity State_ field are defined as follows:
 
@@ -100,6 +116,8 @@ Value | Definition
 0x0d  | Waiting Warm-up
 0x0e  | No Paired Sensor
 
+Observed through a full sensor change on a 780G + Guardian 4: removing the old sensor (transmitter in charger) read _No Message_ (0x00), not _No Sensor Signal_ (0x06), with _Sensor Connectivity State_ `0x07` and the pump on Safe Basal. After confirming "start new sensor" the field went to _Warm-up_ (0x08) for ~2 h, then **directly** to live readings — no _Calibrating_ (0x04) or _Calibration Required_ (0x03), as the Guardian 4 is factory-calibrated. _Waiting Warm-up_ (0x0d) and _Wait To Calibrate_ (0x01) did not appear.
+
 
 ## IDD Status Changed
 
@@ -114,6 +132,8 @@ E2E-Counter   | u8           | 0 or 1        | N/A
 E2E-CRC       | u16          | 0 or 2        | N/A
 
 Per the spec, the pump is expected to retain the status of a bit of the _Flags_ field until its value is reset by the app through the _Reset Status_ procedure using the characteristic _IDD Status Reader Control Point_.
+
+On a 780G the latching is strict: without a _Reset Status_ the pump sends exactly one indication per subscription — carrying every bit latched since the last reset — then stays silent regardless of further changes. A client that wants continuous pushes must _Reset Status_ after every indication. The pump also does not notify _CGM Measurement_ (`0x2AA7`) unsolicited (in one overnight capture all 427 measurement notifications arrived within 0–3 s of a RACP request), so this characteristic's indication is the only push channel for new CGM data.
 
 Bits in the _Flags_ field are defined as follows (Medtronic's custom extensions marked):
 
@@ -149,6 +169,13 @@ Bit   | Definition                               | Description
 32    | Sensor Calibration Status Icon Changed   | custom extension
 33    | Early Sensor Calibration Time Changed    | custom extension
 
+Some custom bit names above do not match observed 780G behaviour:
+
+- **Bit 19 ("Sensor EOL")** is set on *every* _New CGM Measurement_ indication (alongside bit 18 on each 5-minute push), so it is not an end-of-life flag here — the name is wrong or the bit is repurposed.
+- Through a **sensor change**, the bits that fired were **20, 21, 22** (Connectivity State, first as the sensor reconnected), **26** and **27**. Bits **25** ("Sensor Changed") and **30** ("Sensor Warm-up Time Remaining Changed") did *not* fire — confirmed through two full sensor changes. Bit 30 is consistent with the pump rejecting _Get Sensor Warm-up Time Remaining_ (0x0403) as unsupported (see below).
+- **Bit 17 ("Insulin On Board") fires per delivery increment during a bolus**: one indication per 0.5 IU step, 2 s apart, each also carrying bit 6 (Active Bolus) and bit 2 (Reservoir), the last adding bit 7 (History Event) as the record commits. A client resetting after every indication can track bolus delivery in near-real-time.
+- A **manual fingerstick BG** fires a short burst touching bits **20, 21, 26, 27** — the same family as a sensor/calibration change. Bit **26** appears in every BG entry and is the most reliable marker; bit 21 is not specific (it also rides ordinary _New CGM Measurement_ pushes). The entry also records a _BG Reading_ (0xf007) and replaces the displayed SG with the entered value until the next SG. To detect a manual BG from the flags, treat the family as a trigger and confirm with a fresh 0xf007 in the history log.
+
 
 ## IDD Status Reader Control Point
 
@@ -178,6 +205,8 @@ The opcodes that contain "response" in the name are used only in responses, the 
 Medtronic also slightly modifies some of the commands and responses defined in the spec:
 
 - _Reset Status_ uses the extended _Flags_ field defined in _IDD Status Changed_
+
+    On a 780G, _Reset Status_ (`0x030C` + the extended _Flags_ field exactly as received on _IDD Status Changed_, SAKE-encrypted, no E2E) is answered with the generic spec response on the same characteristic: `03 03 0c 03 0f` = _Response Code_ (`0x0303`) + echoed opcode (`0x030C`) + `0x0F` (_Success_).
 - _Get Active Basal Rate Delivery Response_ uses:
     - 4-byte floats instead of 2-byte floats for field _Active Basal Rate Current Config Value_
     - 4-byte floats instead of 2-byte floats for field _TBR Adjustment Value_
