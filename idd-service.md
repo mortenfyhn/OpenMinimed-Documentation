@@ -237,6 +237,9 @@ Bit | Definition                 | Description
 0   | Remaining Duration Present | If this bit is set, field _Remaining Duration_ is present
 1   | IOB Partial Status Present | If this bit is set, fields _IOB Partial Status Duration_ and _IOB Partial Status Remaining_ are present (Medtronic custom)
 
+> [!NOTE]
+> Confirmed on a 780G: _Get Insulin On Board_ (opcode `0x03f3`) is sent with no E2E-CRC and the response comes back with `Flags = 0x00` (no optional fields); the `Insulin On Board` f32 matches the pump's on-screen _Active Insulin_.
+
 
 ### Format of custom _Get Therapy Algorithm States_ command and response
 
@@ -827,6 +830,8 @@ BG Value                    | f16          | 2             | kg/L
 
 NOTE: Convert the value in field _BG Value_ to the more common unit mg/dL by multiplying with 10⁵.
 
+On a 780G, a manual fingerstick BG records this event, and the mg/dL conversion above matches the pump display exactly (entered `180 mg/dL` → 180). Its _IDD Status Changed_ signature is described under [IDD Status Changed](#idd-status-changed). This is distinct from a _Calibration Complete_ (0xf008): a BG entry not consumed as a calibration lands here.
+
 
 #### Calibration Complete (0xf008)
 
@@ -930,7 +935,38 @@ Instance ID                 | u16          | 2             | None
 
 #### Annunciation Consolidated (event type 0xf010)
 
-_TODO:_
+The pump logs one of these when it raises an annunciation (alarm/alert). The record exists while the alarm is active, not only after it clears (confirmed on a 780G: a "replace battery" alarm logged _Annunciation Type_ `0xf054`, _Annunciation Status_ `0x0f`). Structure per `PythonPumpConnector/history/data.py` (`AnnunciationData`):
+
+Field Name                  | Data Type    | Size (octets) | Unit
+----------------------------|--------------|---------------|------
+Event Flags                 | 8 bit        | 1             | None
+Annunciation Instance ID    | u16          | 2             | None
+Annunciation Type           | u16          | 2             | None
+Annunciation Status         | Enum of u8   | 1             | None
+Timestamp                   | u32          | 4             | seconds since 2000-01-01 00:00:00
+Auxiliary Data              | variable     | 0–8           | None
+
+The _Annunciation Type_ carries `0xf000` in the top nibble; mask with `0x0fff` for the type code. Known codes are listed in `data.py` (`AnnunciationType`); `0x054` (insert battery) is field-confirmed.
+
+Bits in the _Event Flags_ field:
+
+Bit | Definition
+----|------------------
+0–5 | AuxInfo1–6 present
+6   | Alert Silenced
+
+Bits 0 and 1 are always set (the timestamp occupies AuxInfo1/2). _Alert Silenced_ presumably marks an alert raised inside a configured quiet window; not verified.
+
+Values of the _Annunciation Status_ field (`PumpAnnunciationStatus`):
+
+Value | Definition
+------|--------------
+0x0f  | Undetermined
+0x33  | Pending
+0x3c  | Snoozed
+0x55  | Confirmed
+
+The _Auxiliary Data_ contents depend on the _Annunciation Type_ (e.g. the SG value for low/high SG alerts, units remaining for low reservoir); see `AnnunciationData._parse_impl` for the per-type layouts.
 
 
 #### Max Auto Basal Rate Changed (event type 0xf01a)
