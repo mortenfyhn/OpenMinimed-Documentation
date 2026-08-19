@@ -47,6 +47,8 @@ We can reliably get the pump to reconnect if we let the Peripheral send advertis
 > [!IMPORTANT]
 > The pump seems to only reconnect to devices that are using a Resolvable Private Address (RPA). The initial pairing also works with public addresses though. So if you have trouble with reconnects, this is one of the things to check.
 
+Confirmed on hardware (780G + a NimBLE peripheral): the pump reconnects **by bonded address**, not by advertised payload. It connects and re-runs SAKE whenever the peripheral is connectable on the address it bonded to — even when the peripheral advertises an unrelated payload with no `0xfe81` and no RPA. The `0xfe81` + RPA path is only how the pump finds a peripheral that advertises a privacy RPA: it resolves the RPA using the peripheral's IRK, which must be distributed during pairing (Android does this by default; NimBLE distributes the LTK only unless configured to include the identity keys). So a peripheral cannot avoid reconnects by changing its advert — only by refusing the connection. After reconnecting, the pump always re-runs the full SAKE handshake; there is no session resume.
+
 
 ## MAC addresses
 
@@ -61,3 +63,16 @@ There seems to be no such relation between a pump's MAC address and its serial n
 ## Device names
 
 Pumps use their serial numbers of the form `NGxxxxxxxH` and translate them into the device name `Pump xxxxxxxH`, keeping the 7-digit number the same.
+
+
+## Connection parameters
+
+The pump (as central) dictates the connection parameters and does not renegotiate them. Observed on a 780G with a peripheral that had completed SAKE and was polling CGM:
+
+    connection interval   100 (125 ms)
+    slave latency         0
+    supervision timeout   300 (3000 ms)
+
+The pump refuses peripheral-initiated parameter updates. An L2CAP Connection Parameter Update Request for slave latency 1 or 4 (keeping the pump's own interval and timeout) is rejected with HCI error `0x3B` _Unacceptable Connection Parameters_, even though it satisfies the spec's `supervision_timeout > (1 + latency) × interval × 2` constraint with margin. The pump rejects the mechanism, not a particular value.
+
+This matters for a battery-powered peripheral: latency 0 at a 125 ms interval means the radio wakes ~8 times a second for as long as the link is up. The [NOS service](nos-service.md) "Observation Mode" write carries interval, latency and supervision timeout, and is presumably the sanctioned mechanism the official app uses.
