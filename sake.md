@@ -13,6 +13,15 @@ Presumably due to the used BT protocol (see more [here](app-services.md)) SAKE c
 The key databases are static between devices and each device type / model. See the detailed description of the format and the actual keys [here](key_databases.md).
 
 
+## Security properties
+
+- **Pre-shared symmetric keys, not key agreement.** Both sides must already hold identical static keys; the handshake only proves possession. Contrast BLE's own LE Secure Connections pairing, which derives a fresh key between strangers via ECDH.
+- **Fleet-wide, not per-device.** Key databases are indexed by *device type*, so every pump of a model — and every copy of the matching app — carries the same bytes. There is no per-device identity and no revocation: a single extraction is permanent and global.
+- **No forward secrecy.** The session key is `AES-ECB(derivation_key, server_key_material || client_key_material)`, and both key-material inputs travel in the clear during the handshake. Anyone holding the key database can decrypt a captured session retroactively.
+
+SAKE is therefore a *compatibility gate* — it restricts which device types will talk to a pump — rather than a security boundary. This does not expose pump traffic to a passive sniffer, though: SAKE runs inside BLE's link encryption, whose LTK is never transmitted.
+
+
 ## Initialization
 
 After the successful BLE connection of a SAKE-compatible device, the following steps are necessary to perform a successful handshake:
@@ -120,9 +129,18 @@ Session-encrypted permit = (12 bytes of data) + (4 bytes of CMAC)
 The decrypted permit format is currently not very well understood.  The first byte has to be 0x00, the second has to equal the remote side's (prover) device type.
 
 
-### 5_c
+### 5_c – client permit
 
-_TODO: document this_
+The mirror of `4_s`: the client's permit, so both sides prove they hold the pre-shared permit keys. The layout and validation are identical to `4_s`, only the direction differs (the client's SeqCrypt instance decrypts it).
+
+Byte index | Meaning
+-----------|------------
+0–15       | Session-encrypted permit
+
+The 16-byte payload is decrypted with the client's SeqCrypt instance (`client_crypt`, starting at sequence 0), giving the 16-byte permit plus a trailing random pad byte (discarded). The permit is then decrypted with `permit_decrypt_key` (AES-ECB), its trailing 4-byte CMAC (over the first 12 bytes) verified with `permit_auth_key`, and accepted iff `plain[0] == 0x00` and `plain[1]` equals the prover's (client's) device type. Success completes the handshake; both directions of the SeqCrypt session cipher are now live.
+
+> [!NOTE]
+> The full server-role handshake (`0_s`–`5_c`) has been reimplemented independently in C and verified byte-for-byte against OpenMinimed's `780g_pairing_with_mobile` trace and the reference `pysake` implementation.
 
 
 ---
