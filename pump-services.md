@@ -95,7 +95,11 @@ This is the standard GATT service as defined by the Bluetooth SIG, containing on
 
 UUID   | Name                       | Properties   | SAKE-encrypted | Notes
 -------|----------------------------|--------------|----------------|-------
-0x2a19 | Battery Level              | Read, Notify | no             |
+0x2a19 | Battery Level              | Read, Notify | no             | Coarse on the 780G — see note.
+
+> On a 780G, `0x2A19` is coarse: only 50% (flat across a day) and 100% (fresh battery) have been
+> observed, with no samples taken while the battery drained. For a reliable low-battery signal, use
+> the pump's "replace battery" annunciation (type `0x054`) instead.
 
 
 ## Continuous Glucose Monitoring
