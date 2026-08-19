@@ -24,6 +24,8 @@ The implementation follows the standard defined in [[CGMS]](#ref-cgms) and [[GSS
 
 The data returned by the pump in this characteristic is SAKE-encrypted.
 
+On a 780G, while the sensor has no displayable glucose the pump keeps sending measurement records with a plain glucose value of **0 mg/dL** and advancing time offsets, rather than the SFLOAT NaN/NRes/Inf sentinels. This holds for SG below the display range (_Sensor Message State_ `0x09`, pump shows "LO"), "sensor updating" (`0x02`), "change sensor" (`0x07`) and warm-up (`0x08`) — a full sensor-change arc produced no sentinel at any point. A new session's time offsets restart near zero and the 0-records advance in the usual 5-minute steps; while the transmitter is off charging, no records flow at all. A client that treats 0 as a real reading will graph false zeros — check the _Sensor Message State_ in [IDD Status](idd-service.md) to tell off-scale from no-data. SG above the display range (`0x0A`) is expected to behave the same but has not been captured.
+
 
 ## Session Start Time
 
